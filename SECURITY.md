@@ -33,11 +33,12 @@ collaborator handed you. Its security posture is built around that.
 - **Path traversal blocked; symlinks followed transparently.** A requested path must sit
   lexically under the tree root — `..` components cannot walk above it. A **symlink entry**
   under the root is followed when its target stays inside the root; a target resolving
-  *outside* the root is blocked by default (a placeholder names the target instead) and read
-  only with the explicit `follow_external_symlinks` config opt-in. Every followed link is
-  announced with a visible `symlink → target` notice, so nothing is ever read silently. Only
-  regular files are opened (never a FIFO, device, or directory), and symlinked directories are
-  enumerated with cycle detection.
+  *outside* the root is blocked by default — no content is read and no external directory
+  structure is enumerated (tree and finder both treat it as a leaf; a placeholder names the
+  target) — unless the user sets the explicit `follow_external_symlinks` config opt-in. Every
+  followed link is announced with a visible `symlink → target` notice, so nothing is ever read
+  silently. Only regular files are opened (never a FIFO, device, or directory), and symlinked
+  directories are enumerated with cycle detection.
 
 - **Resource bounds.** File reads and captured renderer/diff output are size-capped, and external
   renderers run under a wall-clock timeout, so a huge or slow input degrades gracefully rather

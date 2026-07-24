@@ -68,10 +68,11 @@
 # toggles this at runtime. Default:
 #hide_dotfiles = false
 
-# Follow a symlink whose target resolves OUTSIDE the tree root and show the
-# target's content (always with a visible `symlink → target` notice). By default
-# such a symlink shows a placeholder naming the target instead; symlinks that
-# stay inside the root are always followed. Default:
+# Follow symlinks whose target resolves OUTSIDE the tree root: show the file
+# content (always with a visible `symlink → target` notice) and browse into
+# symlinked directories. By default nothing beyond the link itself is exposed —
+# a placeholder names the target, and external folders never enumerate; symlinks
+# staying inside the root are always followed. Default:
 #follow_external_symlinks = false
 
 # Once-a-day check for a newer release. Set false to disable (or set the

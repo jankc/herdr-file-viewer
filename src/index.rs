@@ -25,6 +25,10 @@ pub(crate) fn walk_builder(root: &Path) -> WalkBuilder {
 
 /// Return every file under `root` as a root-relative `String`, respecting `.gitignore`.
 ///
+/// `follow_external_symlinks` mirrors the config key: off, a symlinked directory whose target
+/// resolves outside the root is pruned (its external structure is never enumerated); on, it is
+/// descended like any directory. Symlinks are otherwise followed either way.
+///
 /// - Recursive (no depth limit) — AC-12.
 /// - `.gitignore`-d files are excluded — AC-13.
 /// - The `.git` subtree is pruned entirely — AC-14.
@@ -33,7 +37,8 @@ pub(crate) fn walk_builder(root: &Path) -> WalkBuilder {
 /// - Each call performs a fresh walk; no cache — AC-18.
 /// - Works in non-git directories without error (`require_git(false)`) — AC-19.
 /// - Read-only: no filesystem or git mutations — AC-N1, AC-N2.
-pub fn build(root: &Path) -> Vec<String> {
+pub fn build(root: &Path, follow_external_symlinks: bool) -> Vec<String> {
+    let canon_root = root.canonicalize().ok();
     let mut builder = walk_builder(root);
     builder
         .hidden(false) // include dotfiles (AC-17 depends on the index NOT hiding dotfiles)
@@ -42,7 +47,24 @@ pub fn build(root: &Path) -> Vec<String> {
         // Follow symlinks so linked files are listed and linked directories are descended;
         // `ignore` detects link loops itself and yields them as errors, dropped below.
         .follow_links(true)
-        .filter_entry(|e| e.file_name() != ".git"); // prune entire .git subtree — AC-14
+        .filter_entry(move |e| {
+            if e.file_name() == ".git" {
+                return false; // prune entire .git subtree — AC-14
+            }
+            // Without the follow_external_symlinks opt-in, prune a symlinked directory whose
+            // canonical target escapes the root, so external structure is never enumerated
+            // (matching the Tree Model's gate).
+            if !follow_external_symlinks
+                && e.path_is_symlink()
+                && e.file_type().is_some_and(|t| t.is_dir())
+            {
+                return match (e.path().canonicalize(), &canon_root) {
+                    (Ok(canon), Some(cr)) => canon.starts_with(cr),
+                    _ => false,
+                };
+            }
+            true
+        });
 
     builder
         .build()

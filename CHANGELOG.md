@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
-- `follow_external_symlinks` config key (default `false`): opt in to reading a symlink whose target resolves outside the tree root; blocked links show a placeholder naming the target. → [configuration](docs/configuration.md)
+- `follow_external_symlinks` config key (default `false`): opt in to following symlinks whose target resolves outside the tree root (content, tree browsing, finder). Blocked links show a placeholder naming the target and never expose external structure. → [configuration](docs/configuration.md)
 
 ### Changed
 - Symlinks are now first-class: in-root symlinked files show their target's content with a visible `symlink → target` notice, symlinked directories are browsable in the tree (with link-cycle protection), and symlinked files appear in the go-to-file finder. `..`-style path traversal above the root remains blocked. → [usage](docs/usage.md#symlinks)

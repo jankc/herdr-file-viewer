@@ -5217,12 +5217,15 @@ fn open_finder_opens_finder_with_full_candidate_list_and_empty_query() {
     assert!(fx.redraw, "OpenFinder triggers a redraw");
     assert!(ctrl.finder_open(), "finder_open() is true after OpenFinder");
 
-    // Candidates must equal index::build(root) — same set, order may differ.
-    let mut expected = herdr_file_viewer::index::build(dir.path());
+    // Candidates must equal index::build(root, false) — same set, order may differ.
+    let mut expected = herdr_file_viewer::index::build(dir.path(), false);
     expected.sort();
     let mut got = ctrl.finder_candidates().to_vec();
     got.sort();
-    assert_eq!(got, expected, "candidates must equal index::build(root)");
+    assert_eq!(
+        got, expected,
+        "candidates must equal index::build(root, false)"
+    );
 
     assert_eq!(
         ctrl.finder_query(),
@@ -6140,12 +6143,12 @@ fn finder_candidates_are_independent_of_changed_only_filter() {
 
     let mut got = ctrl.finder_candidates().to_vec();
     got.sort();
-    let mut expected = herdr_file_viewer::index::build(dir.path());
+    let mut expected = herdr_file_viewer::index::build(dir.path(), false);
     expected.sort();
 
     assert_eq!(
         got, expected,
-        "finder candidates must equal index::build(root), unaffected by changed_only (AC-16)"
+        "finder candidates must equal index::build(root, false), unaffected by changed_only (AC-16)"
     );
     // Sanity: there are more candidates than just the changed file.
     assert!(
@@ -6185,11 +6188,11 @@ fn finder_candidates_include_dotfiles_even_with_hide_hidden_on() {
     // Cross-check against index::build — the sets must be identical.
     let mut got = candidates.clone();
     got.sort();
-    let mut expected = herdr_file_viewer::index::build(dir.path());
+    let mut expected = herdr_file_viewer::index::build(dir.path(), false);
     expected.sort();
     assert_eq!(
         got, expected,
-        "finder candidates must equal index::build(root), unaffected by hide_hidden (AC-17)"
+        "finder candidates must equal index::build(root, false), unaffected by hide_hidden (AC-17)"
     );
 }
 
@@ -6216,10 +6219,10 @@ fn finder_works_fully_in_a_non_git_directory() {
         "finder is open in a non-git root (AC-19)"
     );
 
-    // 2. Candidate list must be non-empty and equal to index::build(root).
+    // 2. Candidate list must be non-empty and equal to index::build(root, false).
     let mut got = ctrl.finder_candidates().to_vec();
     got.sort();
-    let mut expected = herdr_file_viewer::index::build(dir.path());
+    let mut expected = herdr_file_viewer::index::build(dir.path(), false);
     expected.sort();
     assert!(!got.is_empty(), "non-git root has files to list (AC-19)");
     assert_eq!(
@@ -6387,7 +6390,7 @@ fn ac_n2_finder_exercise_does_not_mutate_git_state() {
 #[test]
 fn ac_n4_fresh_controller_rebuilds_candidates_from_disk_with_no_persistent_state() {
     // AC-N4: the finder writes no state to disk. A second, fresh Controller over the same root
-    // must produce the same candidate set as index::build(root), and the filesystem must be
+    // must produce the same candidate set as index::build(root, false), and the filesystem must be
     // unchanged (no cache file created by the first controller's use of the finder).
     let dir = TempDir::new();
     std::fs::write(dir.path().join("alpha.txt"), "a").unwrap();
@@ -6425,14 +6428,14 @@ fn ac_n4_fresh_controller_rebuilds_candidates_from_disk_with_no_persistent_state
         "AC-N4: no new file must appear under root from using the finder"
     );
 
-    // Second, fresh controller: candidates must match index::build(root).
+    // Second, fresh controller: candidates must match index::build(root, false).
     let (mut ctrl2, _, _) = controller(dir.path(), false, StubGit::default(), false);
     ctrl2.handle(Intent::OpenFinder);
     assert!(ctrl2.finder_open(), "fresh controller opened the finder");
 
     let mut got = ctrl2.finder_candidates().to_vec();
     got.sort();
-    let mut expected_candidates = herdr_file_viewer::index::build(dir.path());
+    let mut expected_candidates = herdr_file_viewer::index::build(dir.path(), false);
     expected_candidates.sort();
 
     assert_eq!(

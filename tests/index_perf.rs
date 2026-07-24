@@ -57,11 +57,11 @@ fn index_build_scales_linearly() {
     build_tree(dir_2n.path(), DIRS * 2, FILES_PER_DIR);
 
     let t = Instant::now();
-    let candidates_n = index::build(dir_n.path());
+    let candidates_n = index::build(dir_n.path(), false);
     let elapsed_n = t.elapsed();
 
     let t = Instant::now();
-    let candidates_2n = index::build(dir_2n.path());
+    let candidates_2n = index::build(dir_2n.path(), false);
     let elapsed_2n = t.elapsed();
 
     // Sanity: the candidate count roughly doubled (dirs doubled, files_per_dir constant).
@@ -92,12 +92,12 @@ fn index_build_scales_linearly() {
 fn fuzzy_match_scales_linearly() {
     let dir_n = TempDir::new();
     build_tree(dir_n.path(), DIRS, FILES_PER_DIR);
-    let candidates_n = index::build(dir_n.path());
+    let candidates_n = index::build(dir_n.path(), false);
     assert!(candidates_n.len() >= DIRS * FILES_PER_DIR);
 
     let dir_2n = TempDir::new();
     build_tree(dir_2n.path(), DIRS * 2, FILES_PER_DIR);
-    let candidates_2n = index::build(dir_2n.path());
+    let candidates_2n = index::build(dir_2n.path(), false);
     assert!(candidates_2n.len() >= DIRS * 2 * FILES_PER_DIR);
 
     // "apprs" exercises the subsequence path on realistic filenames.

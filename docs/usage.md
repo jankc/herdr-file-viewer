@@ -169,12 +169,14 @@ Symlinks are first-class: selecting a symlinked file shows the target's content 
 `symlink → target` notice, symlinked directories expand in the tree like normal directories (link
 cycles are detected and never recurse), and symlinked files show up in the go-to-file finder.
 
-A symlink whose target resolves **outside** the tree root is the one guarded case: by default it
-shows a placeholder naming the target instead of its content. Set
-[`follow_external_symlinks = true`](configuration.md) to follow it — the `symlink → target` notice
-always tells you what was actually read. `..`-style path traversal above the root is refused
-either way. For a *changed* tracked symlink, the diff shows what git versions — the link's target
-path — while the content views show the target file itself.
+A symlink whose target resolves **outside** the tree root is the one guarded case: by default
+nothing beyond the link itself is exposed — a symlinked file shows a placeholder naming the
+target instead of its content, and a symlinked directory is a plain leaf entry (it doesn't expand,
+and the finder never lists what's inside). Set
+[`follow_external_symlinks = true`](configuration.md) to follow them — the `symlink → target`
+notice always tells you what was actually read. `..`-style path traversal above the root is
+refused either way. For a *changed* tracked symlink, the diff shows what git versions — the
+link's target path — while the content views show the target file itself.
 
 ## Git awareness
 

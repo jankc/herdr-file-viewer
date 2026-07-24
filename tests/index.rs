@@ -11,7 +11,7 @@ fn nested_file_appears() {
     fs::create_dir_all(root.join("a/b")).unwrap();
     fs::write(root.join("a/b/deep.rs"), "").unwrap();
 
-    let paths = index::build(root);
+    let paths = index::build(root, false);
     assert!(
         paths.iter().any(|p| p == "a/b/deep.rs"),
         "expected a/b/deep.rs in index, got: {paths:?}"
@@ -27,7 +27,7 @@ fn gitignored_file_is_absent() {
     fs::write(root.join("secret.txt"), "hidden").unwrap();
     fs::write(root.join("visible.txt"), "shown").unwrap();
 
-    let paths = index::build(root);
+    let paths = index::build(root, false);
     assert!(
         !paths.iter().any(|p| p == "secret.txt"),
         "secret.txt must be absent (gitignored)"
@@ -45,7 +45,7 @@ fn git_subtree_is_excluded() {
     let root = tmp.path();
     common::init_repo_with_commit(root);
 
-    let paths = index::build(root);
+    let paths = index::build(root, false);
     assert!(
         !paths.iter().any(|p| p.starts_with(".git")),
         "no path may start with .git, got: {paths:?}"
@@ -60,7 +60,7 @@ fn directories_not_in_index() {
     fs::create_dir_all(root.join("subdir")).unwrap();
     fs::write(root.join("subdir/file.txt"), "").unwrap();
 
-    let paths = index::build(root);
+    let paths = index::build(root, false);
     assert!(
         !paths.iter().any(|p| p == "subdir"),
         "bare directory 'subdir' must not appear in index"
@@ -80,7 +80,7 @@ fn all_paths_are_root_relative() {
     fs::write(root.join("a/b/deep.rs"), "").unwrap();
     fs::write(root.join("top.txt"), "").unwrap();
 
-    let paths = index::build(root);
+    let paths = index::build(root, false);
     assert!(!paths.is_empty(), "index must not be empty");
     for p in &paths {
         assert!(
@@ -98,12 +98,12 @@ fn rebuild_includes_new_file() {
     let root = tmp.path();
     fs::write(root.join("first.txt"), "").unwrap();
 
-    let before = index::build(root);
+    let before = index::build(root, false);
     assert!(before.iter().any(|p| p == "first.txt"));
     assert!(!before.iter().any(|p| p == "second.txt"));
 
     fs::write(root.join("second.txt"), "").unwrap();
-    let after = index::build(root);
+    let after = index::build(root, false);
     assert!(
         after.iter().any(|p| p == "second.txt"),
         "second.txt must appear after it is created"
@@ -118,7 +118,7 @@ fn works_in_non_git_dir() {
     // No git init — plain directory
     fs::write(root.join("plain.txt"), "hello").unwrap();
 
-    let paths = index::build(root);
+    let paths = index::build(root, false);
     assert!(
         paths.iter().any(|p| p == "plain.txt"),
         "plain.txt must appear in a non-git dir"
@@ -137,7 +137,7 @@ fn filesystem_unchanged_after_build() {
         .map(|e| e.unwrap().file_name())
         .collect();
 
-    let _ = index::build(root);
+    let _ = index::build(root, false);
 
     let after: Vec<_> = fs::read_dir(root)
         .unwrap()
@@ -165,7 +165,7 @@ fn index_follows_symlinks_to_files_and_dirs() {
     symlink(root.join("real.txt"), root.join("file-link.txt")).unwrap();
     symlink(root.join("real-dir"), root.join("dir-link")).unwrap();
 
-    let paths = index::build(root);
+    let paths = index::build(root, false);
     assert!(
         paths.iter().any(|p| p == "file-link.txt"),
         "a symlink to a file is indexed: {paths:?}"
@@ -187,9 +187,36 @@ fn index_survives_a_symlink_cycle() {
     symlink(root.join("a"), root.join("a/loop")).unwrap(); // a/loop → a
 
     // `ignore` reports the loop as a per-entry error, which build() drops — the walk completes.
-    let paths = index::build(root);
+    let paths = index::build(root, false);
     assert!(
         paths.iter().any(|p| p == "a/file.txt"),
         "the walk completes and lists real files: {paths:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn index_prunes_an_out_of_root_symlinked_directory_unless_opted_in() {
+    use std::os::unix::fs::symlink;
+    let outside = common::TempDir::new();
+    fs::write(outside.path().join("secret.txt"), "s").unwrap();
+    let tmp = common::TempDir::new();
+    let root = tmp.path();
+    fs::write(root.join("normal.txt"), "n").unwrap();
+    symlink(outside.path(), root.join("ext")).unwrap();
+
+    // Default: the external directory's structure never reaches the finder index.
+    let paths = index::build(root, false);
+    assert!(
+        !paths.iter().any(|p| p.starts_with("ext/")),
+        "external symlinked dir must be pruned without the opt-in: {paths:?}"
+    );
+    assert!(paths.iter().any(|p| p == "normal.txt"));
+
+    // Opt-in: descended like any directory.
+    let paths = index::build(root, true);
+    assert!(
+        paths.iter().any(|p| p == "ext/secret.txt"),
+        "with the opt-in the symlinked dir is descended: {paths:?}"
     );
 }

@@ -537,6 +537,10 @@ pub struct Controller {
     is_git_repo: bool,
     baseline: Baseline,
     show_ignored: bool,
+    /// Mirror of the config `follow_external_symlinks` key: whether symlinks resolving outside
+    /// the root may be browsed/read. Applied to the tree (and any rebuilt tree on re-root) and
+    /// passed to the finder's index walk.
+    follow_external_symlinks: bool,
     hide_hidden: bool,
     /// Whether quitting with annotations held raises the discard confirm (config
     /// `confirm_discard`, default `true`). When `false`, `q` quits and discards, which
@@ -846,6 +850,7 @@ impl Controller {
             baseline,
             show_ignored: false,
             hide_hidden: false,
+            follow_external_symlinks: false,
             // Defaults ON, matching the resolver: a Controller built without config still guards.
             confirm_discard: true,
             tree_hscroll: 0,
@@ -1058,6 +1063,8 @@ impl Controller {
         self.root = resolved.root.clone();
         self.is_git_repo = resolved.is_git_repo;
         self.tree = TreeModel::new(resolved.root.clone());
+        self.tree
+            .set_follow_external_symlinks(self.follow_external_symlinks);
         // Recompute the cached branch for the new root's bottom-border title. Cheap and
         // synchronous: a single `git rev-parse` against the already-resolved repo root, done once
         // per re-root (not per-frame). `None` when the new root is outside a repo / detached.
@@ -1364,6 +1371,15 @@ impl Controller {
     /// update (the controller's own `hide_hidden` mirror plus the tree's filter) so the later
     /// interactive `.` toggle reads a value already in sync with what it's hiding, rather than
     /// re-applying (or silently undoing) the configured default on the very first press.
+    /// Apply the startup `follow_external_symlinks` config default. Called once by `app::run`
+    /// right after construction, mirroring [`apply_hide_dotfiles`](Self::apply_hide_dotfiles):
+    /// both the controller mirror (re-root, finder) and the live tree are set so every surface
+    /// gates identically.
+    pub fn apply_follow_external_symlinks(&mut self, on: bool) {
+        self.follow_external_symlinks = on;
+        self.tree.set_follow_external_symlinks(on);
+    }
+
     pub fn apply_hide_dotfiles(&mut self, hide: bool) {
         if hide == self.hide_hidden {
             // No change from the current (startup) state — `Controller::new`'s initial render

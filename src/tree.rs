@@ -52,6 +52,11 @@ pub struct TreeModel {
     markers: BTreeMap<PathBuf, Status>,
     /// The changed-set driving the changed-only filter (AC-6), set by `set_changed_only`.
     changed_filter: BTreeMap<PathBuf, Status>,
+    /// Whether a symlink whose target resolves outside the root may be browsed into
+    /// (config `follow_external_symlinks`, default false). Off, such a symlinked directory is a
+    /// leaf `File` node — selecting it shows the content pane's symlink placeholder — so the
+    /// external folder structure is never enumerated.
+    follow_external_symlinks: bool,
 }
 
 impl TreeModel {
@@ -65,7 +70,14 @@ impl TreeModel {
             changed_only: false,
             markers: BTreeMap::new(),
             changed_filter: BTreeMap::new(),
+            follow_external_symlinks: false,
         }
+    }
+
+    /// Allow browsing into symlinked directories whose target resolves outside the root
+    /// (config `follow_external_symlinks`).
+    pub fn set_follow_external_symlinks(&mut self, on: bool) {
+        self.follow_external_symlinks = on;
     }
 
     /// Reveal gitignored/all files (AC-5).
@@ -272,7 +284,13 @@ impl TreeModel {
             .filter(|e| e.depth() == 1) // children only, not `dir` itself
             .filter(|e| e.file_name().to_str() != Some(".git")) // never browse into .git
             .map(|e| {
-                let kind = if e.file_type().is_some_and(|t| t.is_dir()) {
+                // With follow_links on, `file_type()` is the target's type. A symlink to a
+                // directory outside the root is demoted to a leaf File unless the user opted in
+                // (`follow_external_symlinks`), so external structure is never enumerated; the
+                // content pane then shows its symlink placeholder.
+                let kind = if e.file_type().is_some_and(|t| t.is_dir())
+                    && (!e.path_is_symlink() || self.may_browse_into(e.path()))
+                {
                     NodeKind::Dir
                 } else {
                     NodeKind::File
@@ -283,6 +301,18 @@ impl TreeModel {
 
         sort_entries(&mut entries);
         entries
+    }
+
+    /// Whether a symlinked directory may be browsed into: always when its canonical target stays
+    /// inside the (canonical) root, otherwise only with the `follow_external_symlinks` opt-in.
+    fn may_browse_into(&self, path: &Path) -> bool {
+        if self.follow_external_symlinks {
+            return true;
+        }
+        match (path.canonicalize(), self.root.canonicalize()) {
+            (Ok(canon), Ok(canon_root)) => canon.starts_with(&canon_root),
+            _ => false,
+        }
     }
 
     /// Expand a directory (no-op for a path outside the root — AC-N5).

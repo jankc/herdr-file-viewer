@@ -81,12 +81,14 @@ the `left` (default) or `right`. All three set the **startup** split inside the 
 (not the herdr pane, which the host decides); you can still resize live with the grow/shrink keys or
 by dragging the divider, and an explicit resize lifts the cap.
 
-`follow_external_symlinks` controls whether the content pane reads through a symlink whose target
-resolves **outside** the tree root (e.g. a link into your home directory). Off (the default), such
-a symlink shows a placeholder naming the target instead of its content; on, the target is shown —
-always with a visible `symlink → target` notice, so it's never read silently. Symlinks that stay
-inside the root are always followed, and this key never affects diffs (git diffs the link itself,
-not its target). See [symlinks in the usage guide](usage.md#symlinks).
+`follow_external_symlinks` controls whether the viewer follows a symlink whose target resolves
+**outside** the tree root (e.g. a link into your home directory). Off (the default), nothing
+beyond the link itself is exposed: a symlinked file shows a placeholder naming the target instead
+of its content, and a symlinked directory is a plain leaf entry — it doesn't expand in the tree
+and the finder never lists what's inside. On, both are followed — always with a visible
+`symlink → target` notice on content, so it's never read silently. Symlinks that stay inside the
+root are always followed, and this key never affects diffs (git diffs the link itself, not its
+target). See [symlinks in the usage guide](usage.md#symlinks).
 
 `preview_max_lines` and `preview_max_kib` cap how much of a file the content pane shows: a file is
 displayed in full until it exceeds **either** cap, then the pane shows a truncated preview with a

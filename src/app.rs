@@ -122,6 +122,7 @@ pub fn run(open_flag: Option<String>) -> io::Result<()> {
     // Apply the config-driven startup hide-dotfiles default (AC-9). The interactive `.` toggle
     // still flips it later.
     controller.apply_hide_dotfiles(eff.hide_dotfiles);
+    controller.apply_follow_external_symlinks(eff.follow_external_symlinks);
     // Apply the config-driven quit guard (`confirm_discard`): whether quitting with
     // session annotations held confirms first or discards them immediately.
     controller.apply_confirm_discard(eff.confirm_discard);

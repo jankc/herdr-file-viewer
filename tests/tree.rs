@@ -392,3 +392,55 @@ fn symlink_cycle_does_not_recurse_forever() {
         "the cycle guard stops recursion back into an already-walked directory"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn out_of_root_symlinked_directory_is_a_leaf_unless_opted_in() {
+    use herdr_file_viewer::tree::NodeKind;
+    use std::os::unix::fs::symlink;
+
+    let outside = TempDir::new();
+    fs::write(outside.path().join("secret.txt"), "s").unwrap();
+    let dir = TempDir::new();
+    let link = dir.path().join("ext");
+    symlink(outside.path(), &link).unwrap();
+
+    // Default (no opt-in): a leaf File node — the external structure is never enumerated.
+    let mut model = TreeModel::new(dir.path());
+    let node = model
+        .visible_nodes()
+        .into_iter()
+        .find(|n| n.path == link)
+        .expect("link node present");
+    assert_eq!(
+        node.kind,
+        NodeKind::File,
+        "an out-of-root symlinked dir is a leaf without follow_external_symlinks"
+    );
+    model.expand(&link);
+    assert!(
+        !model
+            .visible_nodes()
+            .iter()
+            .any(|n| n.path == link.join("secret.txt")),
+        "expanding must not enumerate the external directory"
+    );
+
+    // Opt-in: browsable like any directory.
+    let mut model = TreeModel::new(dir.path());
+    model.set_follow_external_symlinks(true);
+    let node = model
+        .visible_nodes()
+        .into_iter()
+        .find(|n| n.path == link)
+        .expect("link node present");
+    assert_eq!(node.kind, NodeKind::Dir);
+    model.expand(&link);
+    assert!(
+        model
+            .visible_nodes()
+            .iter()
+            .any(|n| n.path == link.join("secret.txt")),
+        "with the opt-in the symlinked directory expands"
+    );
+}
