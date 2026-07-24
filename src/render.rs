@@ -89,42 +89,78 @@ pub enum Prepared {
     Full { text: String },
 }
 
+/// Whether `path`, normalized lexically (`.` dropped, `..` popping a component), stays under
+/// `root`. No filesystem access — symlinks are deliberately NOT resolved here: this guards the
+/// *requested* path against `..`-style traversal, while symlink entries under the root are the
+/// user's own tree and are resolved (and announced) by [`classify`] itself.
+fn lexically_contains(root: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(root) else {
+        return false;
+    };
+    let mut depth: isize = 0;
+    for c in rel.components() {
+        match c {
+            std::path::Component::Normal(_) => depth += 1,
+            std::path::Component::ParentDir => {
+                depth -= 1;
+                if depth < 0 {
+                    return false; // walked above the root
+                }
+            }
+            std::path::Component::CurDir => {}
+            _ => return false, // no absolute/prefix component can appear under the root
+        }
+    }
+    true
+}
+
 /// Classify a file for display: binary vs. truncated-preview vs. full text. Reads at most
 /// `caps.max_bytes` from disk, so a huge or hostile file can never be slurped whole (AC-N1).
 ///
-/// Refuses to read anything that does not resolve to a **regular file inside `root`**:
-/// a symlink (or `..`) escaping the root cannot leak out-of-root content into the pane
-/// (AC-N5), and a FIFO/device/dir is never opened (no hang, no garbage). Such paths
-/// return `Binary` (a placeholder, no bytes).
-pub fn classify(root: &Path, path: &Path, caps: Caps) -> Prepared {
-    let (Ok(canonical), Ok(canon_root)) = (path.canonicalize(), root.canonicalize()) else {
-        return Prepared::Binary; // unresolvable / missing
-    };
-    if !canonical.starts_with(&canon_root) {
-        return Prepared::Binary; // escapes the root (AC-N5)
+/// The *requested* path must sit lexically under `root` — a `..` (or out-of-root) path is
+/// refused outright, so path traversal cannot reach arbitrary files (AC-N5, amended). A
+/// **symlink entry** under the root, however, is followed even when its target resolves
+/// outside the root; the resolution is announced via the returned `symlink → target` notice
+/// so nothing is read silently. The final target must be a regular file: a FIFO/device/dir
+/// is never opened (no hang, no garbage). Refused paths return `Binary` (a placeholder, no
+/// bytes).
+pub fn classify(root: &Path, path: &Path, caps: Caps) -> (Prepared, Option<String>) {
+    if !lexically_contains(root, path) {
+        return (Prepared::Binary, None); // traversal above the root (AC-N5)
     }
+    let (Ok(canonical), Ok(canon_root)) = (path.canonicalize(), root.canonicalize()) else {
+        return (Prepared::Binary, None); // unresolvable / missing (incl. dangling symlink)
+    };
+    // Announce symlink resolution: the entry itself is a link, or an ancestor symlinked
+    // directory carried the canonical path outside the (canonical) root.
+    let notice = (std::fs::symlink_metadata(path).is_ok_and(|m| m.is_symlink())
+        || !canonical.starts_with(&canon_root))
+    .then(|| format!("symlink → {}", canonical.display()));
     match std::fs::metadata(&canonical) {
         Ok(m) if m.is_file() => {}
-        _ => return Prepared::Binary, // dir / FIFO / device / gone
+        _ => return (Prepared::Binary, notice), // dir / FIFO / device / gone
     }
 
     let byte_len = std::fs::metadata(&canonical).map(|m| m.len()).unwrap_or(0);
     let Ok(file) = File::open(&canonical) else {
-        return Prepared::Binary; // unreadable (e.g. permissions) → placeholder, not a misleading empty pane
+        return (Prepared::Binary, notice); // unreadable (e.g. permissions) → placeholder, not a misleading empty pane
     };
     // Bounded read: at most caps.max_bytes, so a giant/hostile file is never slurped whole. The
     // config resolver clamps the cap to a finite ceiling, so even a configured value keeps this
     // guarantee (AC-N1).
     let mut buf = Vec::new();
     if file.take(caps.max_bytes).read_to_end(&mut buf).is_err() {
-        return Prepared::Full {
-            text: String::new(),
-        };
+        return (
+            Prepared::Full {
+                text: String::new(),
+            },
+            notice,
+        );
     }
 
     // Binary: a NUL byte anywhere in the (bounded) content. No raw bytes are emitted.
     if buf.contains(&0) {
-        return Prepared::Binary;
+        return (Prepared::Binary, notice);
     }
 
     let over_bytes = byte_len >= caps.max_bytes;
@@ -135,7 +171,7 @@ pub fn classify(root: &Path, path: &Path, caps: Caps) -> Prepared {
     } else {
         match String::from_utf8(buf) {
             Ok(t) => t,
-            Err(_) => return Prepared::Binary,
+            Err(_) => return (Prepared::Binary, notice),
         }
     };
 
@@ -155,19 +191,22 @@ pub fn classify(root: &Path, path: &Path, caps: Caps) -> Prepared {
         } else {
             format!("{}-line", caps.max_lines)
         };
-        let notice = format!(
+        let cap_notice = format!(
             "⚠ Truncated preview: showing {} lines ({} of {} bytes); file exceeds the {} cap.",
             preview.lines().count(),
             preview.len(),
             byte_len,
             cap
         );
-        return Prepared::Truncated {
-            text: preview,
+        return (
+            Prepared::Truncated {
+                text: preview,
+                notice: cap_notice,
+            },
             notice,
-        };
+        );
     }
-    Prepared::Full { text }
+    (Prepared::Full { text }, notice)
 }
 
 /// The external renderer commands (program + args) per view mode. Injected so tests stay
@@ -604,7 +643,7 @@ mod tests {
     fn nul_bytes_classify_as_binary_without_emitting_raw_bytes() {
         let p = tmp("bin", &[0x00, 0x01, 0x02, b'h', b'i']);
         assert_eq!(
-            classify(&std::env::temp_dir(), &p, Caps::default()),
+            classify(&std::env::temp_dir(), &p, Caps::default()).0,
             Prepared::Binary
         ); // AC-12
         fs::remove_file(&p).ok();
@@ -656,7 +695,7 @@ mod tests {
     #[test]
     fn small_text_file_is_returned_in_full() {
         let p = tmp("small.txt", b"hello\nworld\n");
-        match classify(&std::env::temp_dir(), &p, Caps::default()) {
+        match classify(&std::env::temp_dir(), &p, Caps::default()).0 {
             Prepared::Full { text } => assert!(text.contains("hello")),
             other => panic!("expected Full, got {other:?}"),
         }
@@ -668,7 +707,7 @@ mod tests {
         let caps = Caps::default();
         let big = vec![b'a'; (caps.max_bytes as usize) + 100];
         let p = tmp("big.txt", &big);
-        match classify(&std::env::temp_dir(), &p, caps) {
+        match classify(&std::env::temp_dir(), &p, caps).0 {
             Prepared::Truncated { text, notice } => {
                 assert!(!notice.is_empty(), "AC-13: a visible truncation notice");
                 assert!(
@@ -691,7 +730,7 @@ mod tests {
         let caps = Caps::default();
         let many = "x\n".repeat(caps.max_lines + 1000);
         let p = tmp("many.txt", many.as_bytes());
-        match classify(&std::env::temp_dir(), &p, caps) {
+        match classify(&std::env::temp_dir(), &p, caps).0 {
             Prepared::Truncated { text, notice } => {
                 assert!(
                     text.lines().count() <= caps.max_lines,
@@ -714,7 +753,7 @@ mod tests {
             max_lines: 100,
             max_bytes: DEFAULT_MAX_BYTES,
         };
-        match classify(&std::env::temp_dir(), &p, caps) {
+        match classify(&std::env::temp_dir(), &p, caps).0 {
             Prepared::Truncated { text, notice } => {
                 assert!(
                     text.lines().count() <= 100,
@@ -739,7 +778,7 @@ mod tests {
             max_lines: DEFAULT_MAX_LINES,
             max_bytes: 64 * 1024,
         };
-        match classify(&std::env::temp_dir(), &p, caps) {
+        match classify(&std::env::temp_dir(), &p, caps).0 {
             Prepared::Truncated { text, notice } => {
                 assert!(
                     text.len() as u64 <= caps.max_bytes,
@@ -767,7 +806,7 @@ mod tests {
             max_lines: DEFAULT_MAX_LINES,
             max_bytes: cap,
         };
-        match classify(&std::env::temp_dir(), &p, caps) {
+        match classify(&std::env::temp_dir(), &p, caps).0 {
             Prepared::Truncated { text, .. } => {
                 assert!(
                     text.len() as u64 <= cap,
@@ -836,19 +875,25 @@ mod tests {
 
     // Creating a symlink reliably without elevated privilege is a unix assumption (Windows
     // symlink creation needs Developer Mode or admin rights, not guaranteed on a CI runner);
-    // the escape-via-symlink guard these exercise is platform-agnostic path canonicalization.
+    // the lexical containment guard has its own platform-agnostic test below.
     #[cfg(unix)]
     #[test]
-    fn refuses_a_symlink_whose_target_escapes_the_root() {
+    fn follows_a_symlink_whose_target_is_outside_the_root_with_a_notice() {
         use std::os::unix::fs::symlink;
         let root = unique_dir("root");
-        let outside = tmp("secret", b"TOPSECRET"); // lives in temp_dir, outside `root`
+        let outside = tmp("elsewhere", b"linked content"); // lives in temp_dir, outside `root`
         let link = root.join("link.txt");
         symlink(&outside, &link).unwrap();
-        assert_eq!(
-            classify(&root, &link, Caps::default()),
-            Prepared::Binary,
-            "AC-N5: no out-of-root read"
+        let (prepared, notice) = classify(&root, &link, Caps::default());
+        match prepared {
+            Prepared::Full { text } => assert!(text.contains("linked content")),
+            other => panic!("expected Full, got {other:?}"),
+        }
+        let notice = notice.expect("out-of-root resolution must be announced");
+        let canonical = outside.canonicalize().unwrap();
+        assert!(
+            notice.contains("symlink →") && notice.contains(&canonical.display().to_string()),
+            "notice names the resolved target: {notice}"
         );
         fs::remove_dir_all(&root).ok();
         fs::remove_file(&outside).ok();
@@ -863,11 +908,51 @@ mod tests {
         fs::write(&real, "hello inside").unwrap();
         let link = root.join("link.txt");
         symlink(&real, &link).unwrap();
-        match classify(&root, &link, Caps::default()) {
+        let (prepared, notice) = classify(&root, &link, Caps::default());
+        match prepared {
             Prepared::Full { text } => assert!(text.contains("hello inside")),
             other => panic!("expected Full, got {other:?}"),
         }
+        assert!(
+            notice.is_some_and(|n| n.contains("symlink →")),
+            "an in-root symlink is still announced"
+        );
         fs::remove_dir_all(&root).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlink_to_a_directory() {
+        use std::os::unix::fs::symlink;
+        let root = unique_dir("root");
+        let real_dir = root.join("real-dir");
+        fs::create_dir_all(&real_dir).unwrap();
+        let link = root.join("dirlink");
+        symlink(&real_dir, &link).unwrap();
+        // A directory is not readable content, symlinked or not (the tree browses it instead).
+        assert_eq!(classify(&root, &link, Caps::default()).0, Prepared::Binary);
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn refuses_a_dotdot_path_that_escapes_the_root_lexically() {
+        // The retained core of AC-N5: `..` traversal in the *requested* path is refused before
+        // any symlink resolution, so path traversal cannot reach arbitrary files.
+        let root = unique_dir("root");
+        fs::create_dir_all(root.join("sub")).unwrap();
+        let outside = tmp("above", b"outside the root");
+        let sneaky = root
+            .join("sub")
+            .join("..")
+            .join("..")
+            .join(outside.file_name().unwrap());
+        assert_eq!(
+            classify(&root, &sneaky, Caps::default()),
+            (Prepared::Binary, None),
+            "AC-N5: no traversal above the root"
+        );
+        fs::remove_dir_all(&root).ok();
+        fs::remove_file(&outside).ok();
     }
 
     #[test]
@@ -876,7 +961,7 @@ mod tests {
         // a directory is not a regular file
         let sub = root.join("subdir");
         fs::create_dir_all(&sub).unwrap();
-        assert_eq!(classify(&root, &sub, Caps::default()), Prepared::Binary);
+        assert_eq!(classify(&root, &sub, Caps::default()).0, Prepared::Binary);
         fs::remove_dir_all(&root).ok();
     }
 

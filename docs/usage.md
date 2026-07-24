@@ -163,6 +163,16 @@ Rendering is **delegated** to `glow` (markdown), `delta` (diffs), and `bat` (syn
 renderer isn't installed the viewer falls back to plain text with a short notice. See
 [external renderers](renderers.md).
 
+### Symlinks
+
+Symlinks are followed everywhere: selecting a symlinked file shows the target's content with a
+visible `symlink → target` notice (also when the target lives **outside** the tree root — the
+notice tells you what was actually read), symlinked directories expand in the tree like normal
+directories (link cycles are detected and never recurse), and symlinked files show up in the
+go-to-file finder. `..`-style path traversal above the root is still refused. For a *changed*
+tracked symlink, the diff shows what git versions — the link's target path — while the content
+views show the target file itself.
+
 ## Git awareness
 
 Git status is woven straight into the tree, not a separate mode:

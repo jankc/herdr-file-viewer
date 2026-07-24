@@ -505,8 +505,8 @@ impl ContentProvider for LiveContent {
         // binary file still shows its diff (AC-9), and there is no point classifying (a wasted
         // bounded file read). Other modes classify first (binary / size guards, AC-12/13).
         // `Prepared::Binary` is inert for the diff path inside `render`.
-        let prepared = if matches!(mode, ViewMode::Diff | ViewMode::FullDiff) {
-            Prepared::Binary
+        let (prepared, link_notice) = if matches!(mode, ViewMode::Diff | ViewMode::FullDiff) {
+            (Prepared::Binary, None)
         } else {
             render::classify(&self.root, path, self.caps)
         };
@@ -586,7 +586,8 @@ impl ContentProvider for LiveContent {
         };
         RenderResult {
             content,
-            notices: notice.into_iter().collect(),
+            // Symlink-resolution notice first, then any renderer/truncation notice.
+            notices: link_notice.into_iter().chain(notice).collect(),
             source,
         }
     }
@@ -1406,6 +1407,42 @@ mod tests {
         assert!(
             out.notices.iter().any(|n| n.contains("50-line")),
             "the configured 50-line cap must reach classify through LiveContent: {:?}",
+            out.notices
+        );
+    }
+
+    /// The classify-side symlink notice must surface in `RenderResult.notices`, ahead of any
+    /// renderer/truncation notice, so the Presenter shows where a link's content really came from.
+    #[cfg(unix)]
+    #[test]
+    fn livecontent_surfaces_the_symlink_notice() {
+        let root = tmp("symlink-notice-wiring");
+        let real = root.join("real.txt");
+        std::fs::write(&real, "hello\n").unwrap();
+        let link = root.join("link.txt");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let content = LiveContent {
+            root: root.clone(),
+            renderers: Renderers {
+                markdown: vec!["cat".into()],
+                diff: vec!["cat".into()],
+                full_diff: vec!["cat".into()],
+                syntax: vec!["cat".into()],
+                timeout: Duration::from_secs(5),
+            },
+            caps: Caps::default(),
+        };
+        let out = content.render_at_width(
+            &link,
+            ViewMode::SyntaxContent,
+            None,
+            None,
+            None,
+            DiffRenderMode::default(),
+        );
+        assert!(
+            out.notices.first().is_some_and(|n| n.contains("symlink →")),
+            "the symlink notice must lead RenderResult.notices: {:?}",
             out.notices
         );
     }

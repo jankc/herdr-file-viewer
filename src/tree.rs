@@ -126,11 +126,24 @@ impl TreeModel {
             return self.changed_only_nodes();
         }
         let mut out = Vec::new();
-        self.collect(&self.root, 0, &mut out);
+        // Cycle guard for symlinked directories: track the canonical path of every directory
+        // already being enumerated (seeded with the root), so a link loop (e.g. `a/loop → a`)
+        // renders the node but never recurses back into an ancestor's real directory.
+        let mut visited = HashSet::new();
+        if let Ok(canon_root) = self.root.canonicalize() {
+            visited.insert(canon_root);
+        }
+        self.collect(&self.root, 0, &mut visited, &mut out);
         out
     }
 
-    fn collect(&self, dir: &Path, depth: usize, out: &mut Vec<Node>) {
+    fn collect(
+        &self,
+        dir: &Path,
+        depth: usize,
+        visited: &mut HashSet<PathBuf>,
+        out: &mut Vec<Node>,
+    ) {
         for (path, kind) in self.entries(dir) {
             let expanded = kind == NodeKind::Dir && self.expanded.contains(&path);
             let dir_dirty = kind == NodeKind::Dir && self.dir_contains_change(&path);
@@ -143,7 +156,12 @@ impl TreeModel {
                 dir_dirty,
             });
             if expanded {
-                self.collect(&path, depth + 1, out);
+                // Recurse only into a real directory not already on the walk (symlink cycles).
+                if let Ok(canon) = path.canonicalize()
+                    && visited.insert(canon)
+                {
+                    self.collect(&path, depth + 1, visited, out);
+                }
             }
         }
     }
@@ -238,6 +256,10 @@ impl TreeModel {
         let mut builder = walk_builder(dir);
         builder
             .max_depth(Some(1))
+            // Report a symlink entry as its *target's* type, so a symlink-to-dir is a
+            // browsable Dir node (cycle protection lives in `collect`, since these
+            // depth-1 walks never recurse and can't loop by themselves).
+            .follow_links(true)
             // Dotfiles (e.g. .gitignore, .github) show by default; the hide-hidden toggle (#46)
             // turns on `ignore`'s hidden filter to drop every `.`-prefixed entry.
             .hidden(self.hide_hidden)

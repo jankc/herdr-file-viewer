@@ -39,6 +39,9 @@ pub fn build(root: &Path) -> Vec<String> {
         .hidden(false) // include dotfiles (AC-17 depends on the index NOT hiding dotfiles)
         .git_ignore(true)
         .git_exclude(true)
+        // Follow symlinks so linked files are listed and linked directories are descended;
+        // `ignore` detects link loops itself and yields them as errors, dropped below.
+        .follow_links(true)
         .filter_entry(|e| e.file_name() != ".git"); // prune entire .git subtree — AC-14
 
     builder

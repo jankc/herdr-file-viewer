@@ -321,3 +321,74 @@ fn reveal_returns_false_for_missing_or_above_root_path() {
         "cursor must be unchanged after above-root reveal"
     );
 }
+
+// Symlink tests are unix-gated: creating a symlink on Windows needs Developer Mode or admin
+// rights, not guaranteed on a CI runner (same convention as the render-layer symlink tests).
+#[cfg(unix)]
+#[test]
+fn symlinked_directory_is_a_dir_node_and_expandable() {
+    use herdr_file_viewer::tree::NodeKind;
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::new();
+    fs::create_dir_all(dir.path().join("real")).unwrap();
+    fs::write(dir.path().join("real/a.txt"), "a").unwrap();
+    symlink(dir.path().join("real"), dir.path().join("link")).unwrap();
+
+    let mut model = TreeModel::new(dir.path());
+    let link = dir.path().join("link");
+    let node = model
+        .visible_nodes()
+        .into_iter()
+        .find(|n| n.path == link)
+        .expect("link node present");
+    assert_eq!(node.kind, NodeKind::Dir, "a symlink-to-dir is a Dir node");
+
+    model.expand(&link);
+    assert!(
+        model
+            .visible_nodes()
+            .iter()
+            .any(|n| n.path == link.join("a.txt")),
+        "expanding a symlinked directory lists its target's children"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_cycle_does_not_recurse_forever() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::new();
+    let a = dir.path().join("a");
+    let b = dir.path().join("b");
+    fs::create_dir_all(&a).unwrap();
+    fs::create_dir_all(&b).unwrap();
+    fs::write(a.join("file.txt"), "x").unwrap();
+    // A self-loop (`a/loop → a`) is dropped by the walker's own loop detection; a *mutual*
+    // cycle spans two depth-1 walks, so only the collect() visited-set guard can stop it.
+    symlink(&a, a.join("loop")).unwrap();
+    symlink(&b, a.join("to-b")).unwrap();
+    symlink(&a, b.join("to-a")).unwrap();
+
+    let mut model = TreeModel::new(dir.path());
+    model.expand(&a);
+    model.expand(&a.join("loop"));
+    model.expand(&a.join("to-b"));
+    model.expand(&a.join("to-b/to-a"));
+    // Terminates (no infinite recursion): the walker drops the self-loop entry, and the
+    // visited-set guard refuses to re-enter `a` via the mutual cycle.
+    let nodes = model.visible_nodes();
+    assert!(
+        nodes.iter().any(|n| n.path == a.join("file.txt")),
+        "the real directory's children are listed"
+    );
+    assert!(
+        nodes.iter().any(|n| n.path == a.join("to-b/to-a")),
+        "the cycling link node itself is listed"
+    );
+    assert!(
+        !nodes.iter().any(|n| n.path == a.join("to-b/to-a/file.txt")),
+        "the cycle guard stops recursion back into an already-walked directory"
+    );
+}

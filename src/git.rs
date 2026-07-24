@@ -450,6 +450,11 @@ fn head_or_empty_tree(repo_root: &Path) -> String {
 
 /// A path that stays within the root: relative, free of parent-dir (`..`) components, and
 /// — once resolved — not escaping the root via a symlinked intermediate directory.
+///
+/// Deliberately stricter than the content pane, which follows a selected symlink and shows
+/// its target with a notice: a diff never needs the target (git diffs the link *blob*, the
+/// target-path text), so refusing a path that resolves outside the root loses nothing that
+/// lives outside it.
 fn is_within_root(repo_root: &Path, path: &Path) -> bool {
     if path.is_absolute() || path.components().any(|c| matches!(c, Component::ParentDir)) {
         return false;

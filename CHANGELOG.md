@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Entries are short on purpose; follow the
 `→` links for the full detail.
 
+## [Unreleased]
+
+### Changed
+- Symlinks are now followed: the content pane shows the target's content with a visible `symlink → target` notice (even when the target resolves outside the tree root), symlinked directories are browsable in the tree (with link-cycle protection), and symlinked files appear in the go-to-file finder. `..`-style path traversal above the root remains blocked. → [usage](docs/usage.md#symlinks)
+
+### Fixed
+- Selecting a symlink no longer shows the misleading `[binary file: preview not shown]` placeholder.
+
 ## [1.14.0] - 2026-07-20
 
 ### Added

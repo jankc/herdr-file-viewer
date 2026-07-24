@@ -30,6 +30,14 @@ collaborator handed you. Its security posture is built around that.
   flag-like id can't option-inject the herdr CLI). Paths are passed to `git` as raw `OsStr`
   arguments after a within-root check (no traversal above the root, no arbitrary reads).
 
+- **Path traversal blocked; symlinks followed transparently.** A requested path must sit
+  lexically under the tree root — `..` components cannot walk above it. A **symlink entry**
+  under the root, however, is part of the tree the user chose to browse: it is followed even
+  when its target resolves outside the root, and the resolution is announced with a visible
+  `symlink → target` notice, so nothing is ever read silently. Only regular files are opened
+  (never a FIFO, device, or directory), and symlinked directories are enumerated with cycle
+  detection.
+
 - **Resource bounds.** File reads and captured renderer/diff output are size-capped, and external
   renderers run under a wall-clock timeout, so a huge or slow input degrades gracefully rather
   than hanging or exhausting memory.

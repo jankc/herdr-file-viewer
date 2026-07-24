@@ -150,3 +150,46 @@ fn filesystem_unchanged_after_build() {
         "build must not add/remove entries in root"
     );
 }
+
+// Symlink tests are unix-gated: creating a symlink on Windows needs Developer Mode or admin
+// rights, not guaranteed on a CI runner.
+#[cfg(unix)]
+#[test]
+fn index_follows_symlinks_to_files_and_dirs() {
+    use std::os::unix::fs::symlink;
+    let tmp = common::TempDir::new();
+    let root = tmp.path();
+    fs::create_dir_all(root.join("real-dir")).unwrap();
+    fs::write(root.join("real-dir/inner.txt"), "x").unwrap();
+    fs::write(root.join("real.txt"), "y").unwrap();
+    symlink(root.join("real.txt"), root.join("file-link.txt")).unwrap();
+    symlink(root.join("real-dir"), root.join("dir-link")).unwrap();
+
+    let paths = index::build(root);
+    assert!(
+        paths.iter().any(|p| p == "file-link.txt"),
+        "a symlink to a file is indexed: {paths:?}"
+    );
+    assert!(
+        paths.iter().any(|p| p == "dir-link/inner.txt"),
+        "a symlinked directory is descended: {paths:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn index_survives_a_symlink_cycle() {
+    use std::os::unix::fs::symlink;
+    let tmp = common::TempDir::new();
+    let root = tmp.path();
+    fs::create_dir_all(root.join("a")).unwrap();
+    fs::write(root.join("a/file.txt"), "x").unwrap();
+    symlink(root.join("a"), root.join("a/loop")).unwrap(); // a/loop → a
+
+    // `ignore` reports the loop as a per-entry error, which build() drops — the walk completes.
+    let paths = index::build(root);
+    assert!(
+        paths.iter().any(|p| p == "a/file.txt"),
+        "the walk completes and lists real files: {paths:?}"
+    );
+}
