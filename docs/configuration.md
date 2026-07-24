@@ -39,9 +39,9 @@ normal case — every key falls back to its default.
 A config key always wins. Only two keys also have an environment-variable fallback tier below the
 config key and above the built-in default — `editor` (`$EDITOR`) and `update_check`
 (`$HERDR_FILE_VIEWER_NO_UPDATE_CHECK`) — giving those two a `config > env > default` chain. Every
-other key (`markdown`, `diff`, `syntax`, `open`, `reveal`, `hide_dotfiles`, `confirm_discard`,
-`scroll_lines`, `tree_width`, `tree_position`, `tree_max_cols`, `preview_max_lines`,
-`preview_max_kib`) has no
+other key (`markdown`, `diff`, `syntax`, `open`, `reveal`, `hide_dotfiles`,
+`follow_external_symlinks`, `confirm_discard`, `scroll_lines`, `tree_width`, `tree_position`,
+`tree_max_cols`, `preview_max_lines`, `preview_max_kib`) has no
 applicable environment variable; for those it's `config > default` only.
 
 ## Keys
@@ -59,6 +59,7 @@ open = "xdg-open"           # override the `O` open-with / `R` reveal-in-file-ma
 reveal = "nautilus"
 
 hide_dotfiles = false       # true to hide dotfiles at startup (the `.` key still toggles)
+follow_external_symlinks = false  # true to follow symlinks whose target resolves outside the tree root
 update_check = true         # false to disable the once-a-day update check
 confirm_discard = true      # false to discard annotations without confirming (on quit / worktree switch)
 scroll_lines = 3            # mouse-wheel step (content/search/help), a 1 to 10 scale: 1 slow · 3 medium · 6 fast · 10 max
@@ -79,6 +80,13 @@ instead of a mostly-blank tree (it only bites past ~100 columns). `tree_position
 the `left` (default) or `right`. All three set the **startup** split inside the viewer's own pane
 (not the herdr pane, which the host decides); you can still resize live with the grow/shrink keys or
 by dragging the divider, and an explicit resize lifts the cap.
+
+`follow_external_symlinks` controls whether the content pane reads through a symlink whose target
+resolves **outside** the tree root (e.g. a link into your home directory). Off (the default), such
+a symlink shows a placeholder naming the target instead of its content; on, the target is shown —
+always with a visible `symlink → target` notice, so it's never read silently. Symlinks that stay
+inside the root are always followed, and this key never affects diffs (git diffs the link itself,
+not its target). See [symlinks in the usage guide](usage.md#symlinks).
 
 `preview_max_lines` and `preview_max_kib` cap how much of a file the content pane shows: a file is
 displayed in full until it exceeds **either** cap, then the pane shows a truncated preview with a

@@ -165,13 +165,16 @@ renderer isn't installed the viewer falls back to plain text with a short notice
 
 ### Symlinks
 
-Symlinks are followed everywhere: selecting a symlinked file shows the target's content with a
-visible `symlink → target` notice (also when the target lives **outside** the tree root — the
-notice tells you what was actually read), symlinked directories expand in the tree like normal
-directories (link cycles are detected and never recurse), and symlinked files show up in the
-go-to-file finder. `..`-style path traversal above the root is still refused. For a *changed*
-tracked symlink, the diff shows what git versions — the link's target path — while the content
-views show the target file itself.
+Symlinks are first-class: selecting a symlinked file shows the target's content with a visible
+`symlink → target` notice, symlinked directories expand in the tree like normal directories (link
+cycles are detected and never recurse), and symlinked files show up in the go-to-file finder.
+
+A symlink whose target resolves **outside** the tree root is the one guarded case: by default it
+shows a placeholder naming the target instead of its content. Set
+[`follow_external_symlinks = true`](configuration.md) to follow it — the `symlink → target` notice
+always tells you what was actually read. `..`-style path traversal above the root is refused
+either way. For a *changed* tracked symlink, the diff shows what git versions — the link's target
+path — while the content views show the target file itself.
 
 ## Git awareness
 

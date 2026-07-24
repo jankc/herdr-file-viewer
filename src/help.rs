@@ -248,7 +248,7 @@ pub fn settings_text(
         (None, None) => "unset".to_owned(),
     };
 
-    // An EMPTY override (`open = ""` tokenizes to no args) is not an override: `CommandOpener`
+    // An EMPTY override (`open                     = ""` tokenizes to no args) is not an override: `CommandOpener`
     // falls through to the per-OS default argv rather than spawning the path as a program (see
     // `opener::with_overrides_empty_prefix_falls_through_to_the_per_os_default`). The row must
     // report that same fallthrough, or it shows a blank value for an opener that in fact runs.
@@ -261,25 +261,27 @@ pub fn settings_text(
     let update_check = if eff.update_check { "on" } else { "off" };
     let confirm_discard = if eff.confirm_discard { "on" } else { "off" };
 
-    // Keys are padded to the widest name (`preview_max_lines`, 17) so the `=` column lines up.
+    // Keys are padded to the widest name (`follow_external_symlinks`, 24) so the `=` column lines up.
     format!(
         "{status_line}\n\
          {location_line}\n\
-         editor            = {editor}\n\
-         open              = {open}\n\
-         reveal            = {reveal}\n\
-         hide_dotfiles     = {hide_dotfiles}\n\
-         update_check      = {update_check}\n\
-         confirm_discard   = {confirm_discard}\n\
-         scroll_lines      = {scroll_lines}\n\
-         tree_width        = {tree_width}\n\
-         tree_position     = {tree_position}\n\
-         tree_max_cols     = {tree_max_cols}\n\
-         preview_max_lines = {preview_max_lines}\n\
-         preview_max_kib   = {preview_max_kib}",
+         editor                   = {editor}\n\
+         open                     = {open}\n\
+         reveal                   = {reveal}\n\
+         hide_dotfiles            = {hide_dotfiles}\n\
+         follow_external_symlinks = {follow_external_symlinks}\n\
+         update_check             = {update_check}\n\
+         confirm_discard          = {confirm_discard}\n\
+         scroll_lines             = {scroll_lines}\n\
+         tree_width               = {tree_width}\n\
+         tree_position            = {tree_position}\n\
+         tree_max_cols            = {tree_max_cols}\n\
+         preview_max_lines        = {preview_max_lines}\n\
+         preview_max_kib          = {preview_max_kib}",
         open = open,
         reveal = reveal,
         hide_dotfiles = eff.hide_dotfiles,
+        follow_external_symlinks = eff.follow_external_symlinks,
         update_check = update_check,
         confirm_discard = confirm_discard,
         scroll_lines = eff.scroll_lines,
@@ -774,6 +776,7 @@ mod tests {
             open: None,
             reveal: None,
             hide_dotfiles: true,
+            follow_external_symlinks: false,
             update_check: false,
             confirm_discard: false,
             scroll_lines: 7,
@@ -811,6 +814,7 @@ mod tests {
             "open",
             "reveal",
             "hide_dotfiles",
+            "follow_external_symlinks",
             "update_check",
             "scroll_lines",
             "tree_width",
@@ -872,12 +876,13 @@ mod tests {
             "settings_text must not use the '(default)' placeholder:\n{text}"
         );
         for row in [
-            "editor            = nano",
-            "open              = xdg-open",
-            "reveal            = xdg-open",
-            "hide_dotfiles     = true",
-            "update_check      = off",
-            "scroll_lines      = 7",
+            "editor                   = nano",
+            "open                     = xdg-open",
+            "reveal                   = xdg-open",
+            "hide_dotfiles            = true",
+            "follow_external_symlinks = false",
+            "update_check             = off",
+            "scroll_lines             = 7",
         ] {
             assert!(
                 text.lines().any(|l| l == row),
@@ -951,25 +956,29 @@ mod tests {
             &wired,
         );
         for row in [
-            "hide_dotfiles     = false",
-            "update_check      = on",
-            "confirm_discard   = on",
+            "hide_dotfiles            = false",
+            "follow_external_symlinks = false",
+            "update_check             = on",
+            "confirm_discard          = on",
             &format!(
-                "scroll_lines      = {}",
+                "scroll_lines             = {}",
                 crate::config::DEFAULT_SCROLL_LINES
             ),
-            &format!("tree_width        = {}", crate::config::DEFAULT_TREE_WIDTH),
-            "tree_position     = left",
             &format!(
-                "tree_max_cols     = {}",
+                "tree_width               = {}",
+                crate::config::DEFAULT_TREE_WIDTH
+            ),
+            "tree_position            = left",
+            &format!(
+                "tree_max_cols            = {}",
                 crate::config::DEFAULT_TREE_MAX_COLS
             ),
             &format!(
-                "preview_max_lines = {}",
+                "preview_max_lines        = {}",
                 crate::config::DEFAULT_PREVIEW_MAX_LINES
             ),
             &format!(
-                "preview_max_kib   = {}",
+                "preview_max_kib          = {}",
                 crate::config::DEFAULT_PREVIEW_MAX_KIB
             ),
         ] {
@@ -996,7 +1005,7 @@ mod tests {
             &wired,
         );
         assert!(
-            text.lines().any(|l| l == "editor            = vi"),
+            text.lines().any(|l| l == "editor                   = vi"),
             "the wired editor must show when config sets none:\n{text}"
         );
     }
@@ -1016,8 +1025,8 @@ mod tests {
             &sample_wired(),
         );
         for row in [
-            "open              = myopen --flag",
-            "reveal            = myreveal -R",
+            "open                     = myopen --flag",
+            "reveal                   = myreveal -R",
         ] {
             assert!(
                 text.lines().any(|l| l == row),
@@ -1026,7 +1035,7 @@ mod tests {
         }
     }
 
-    // An empty override (`open = ""` → no args) is NOT an override: `CommandOpener` falls through
+    // An empty override (`open                     = ""` → no args) is NOT an override: `CommandOpener` falls through
     // to the per-OS default argv, so the row must show that default rather than a blank value.
     #[test]
     fn settings_text_empty_opener_override_shows_the_wired_default() {
@@ -1042,8 +1051,8 @@ mod tests {
             &sample_wired(),
         );
         for row in [
-            "open              = xdg-open",
-            "reveal            = xdg-open",
+            "open                     = xdg-open",
+            "reveal                   = xdg-open",
         ] {
             assert!(
                 text.lines().any(|l| l == row),
@@ -1067,7 +1076,8 @@ mod tests {
             &wired,
         );
         assert!(
-            text.lines().any(|l| l == "editor            = unset"),
+            text.lines()
+                .any(|l| l == "editor                   = unset"),
             "unset editor must show 'unset':\n{text}"
         );
     }

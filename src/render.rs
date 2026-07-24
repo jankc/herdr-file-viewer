@@ -83,6 +83,9 @@ fn truncate_to_bytes(s: &mut String, max_bytes: u64) {
 pub enum Prepared {
     /// A binary file: a placeholder is shown, never the raw bytes (AC-12).
     Binary,
+    /// A refused read (e.g. an out-of-root symlink without the `follow_external_symlinks`
+    /// opt-in): the self-explaining placeholder is shown, never any bytes.
+    Denied { placeholder: String },
     /// A file at/above the size cap: a bounded preview plus a visible notice (AC-13).
     Truncated { text: String, notice: String },
     /// A normal text file shown in full.
@@ -118,24 +121,42 @@ fn lexically_contains(root: &Path, path: &Path) -> bool {
 /// `caps.max_bytes` from disk, so a huge or hostile file can never be slurped whole (AC-N1).
 ///
 /// The *requested* path must sit lexically under `root` — a `..` (or out-of-root) path is
-/// refused outright, so path traversal cannot reach arbitrary files (AC-N5, amended). A
-/// **symlink entry** under the root, however, is followed even when its target resolves
-/// outside the root; the resolution is announced via the returned `symlink → target` notice
-/// so nothing is read silently. The final target must be a regular file: a FIFO/device/dir
-/// is never opened (no hang, no garbage). Refused paths return `Binary` (a placeholder, no
-/// bytes).
-pub fn classify(root: &Path, path: &Path, caps: Caps) -> (Prepared, Option<String>) {
+/// refused outright, so path traversal cannot reach arbitrary files (AC-N5). A **symlink
+/// entry** under the root is followed when its target stays inside the root; a target that
+/// resolves *outside* the root is read only with the `follow_external_symlinks` opt-in
+/// (`Denied` with a self-explaining placeholder otherwise), and every followed link is
+/// announced via the returned `symlink → target` notice so nothing is read silently. The
+/// final target must be a regular file: a FIFO/device/dir is never opened (no hang, no
+/// garbage). Refused paths return `Binary` (a placeholder, no bytes).
+pub fn classify(
+    root: &Path,
+    path: &Path,
+    caps: Caps,
+    follow_external_symlinks: bool,
+) -> (Prepared, Option<String>) {
     if !lexically_contains(root, path) {
         return (Prepared::Binary, None); // traversal above the root (AC-N5)
     }
     let (Ok(canonical), Ok(canon_root)) = (path.canonicalize(), root.canonicalize()) else {
         return (Prepared::Binary, None); // unresolvable / missing (incl. dangling symlink)
     };
+    let escapes_root = !canonical.starts_with(&canon_root);
+    if escapes_root && !follow_external_symlinks {
+        // Blocked by default: name the target and the opt-in instead of reading anything.
+        return (
+            Prepared::Denied {
+                placeholder: format!(
+                    "[symlink → {}: target outside the tree root, not shown — set follow_external_symlinks = true in config.toml to follow it]",
+                    canonical.display()
+                ),
+            },
+            None,
+        );
+    }
     // Announce symlink resolution: the entry itself is a link, or an ancestor symlinked
     // directory carried the canonical path outside the (canonical) root.
-    let notice = (std::fs::symlink_metadata(path).is_ok_and(|m| m.is_symlink())
-        || !canonical.starts_with(&canon_root))
-    .then(|| format!("symlink → {}", canonical.display()));
+    let notice = (std::fs::symlink_metadata(path).is_ok_and(|m| m.is_symlink()) || escapes_root)
+        .then(|| format!("symlink → {}", canonical.display()));
     match std::fs::metadata(&canonical) {
         Ok(m) if m.is_file() => {}
         _ => return (Prepared::Binary, notice), // dir / FIFO / device / gone
@@ -260,9 +281,10 @@ pub fn render(
         );
     }
 
-    // Content modes: a binary file shows a placeholder, never raw bytes (AC-12).
+    // Content modes: a binary or denied file shows a placeholder, never raw bytes (AC-12).
     let (content, base_notice) = match prepared {
         Prepared::Binary => return (Text::raw("[binary file: preview not shown]"), None),
+        Prepared::Denied { placeholder } => return (Text::raw(placeholder.clone()), None),
         Prepared::Full { text } => (text.as_str(), None),
         Prepared::Truncated { text, notice } => (text.as_str(), Some(notice.clone())),
     };
@@ -643,7 +665,7 @@ mod tests {
     fn nul_bytes_classify_as_binary_without_emitting_raw_bytes() {
         let p = tmp("bin", &[0x00, 0x01, 0x02, b'h', b'i']);
         assert_eq!(
-            classify(&std::env::temp_dir(), &p, Caps::default()).0,
+            classify(&std::env::temp_dir(), &p, Caps::default(), false).0,
             Prepared::Binary
         ); // AC-12
         fs::remove_file(&p).ok();
@@ -695,7 +717,7 @@ mod tests {
     #[test]
     fn small_text_file_is_returned_in_full() {
         let p = tmp("small.txt", b"hello\nworld\n");
-        match classify(&std::env::temp_dir(), &p, Caps::default()).0 {
+        match classify(&std::env::temp_dir(), &p, Caps::default(), false).0 {
             Prepared::Full { text } => assert!(text.contains("hello")),
             other => panic!("expected Full, got {other:?}"),
         }
@@ -707,7 +729,7 @@ mod tests {
         let caps = Caps::default();
         let big = vec![b'a'; (caps.max_bytes as usize) + 100];
         let p = tmp("big.txt", &big);
-        match classify(&std::env::temp_dir(), &p, caps).0 {
+        match classify(&std::env::temp_dir(), &p, caps, false).0 {
             Prepared::Truncated { text, notice } => {
                 assert!(!notice.is_empty(), "AC-13: a visible truncation notice");
                 assert!(
@@ -730,7 +752,7 @@ mod tests {
         let caps = Caps::default();
         let many = "x\n".repeat(caps.max_lines + 1000);
         let p = tmp("many.txt", many.as_bytes());
-        match classify(&std::env::temp_dir(), &p, caps).0 {
+        match classify(&std::env::temp_dir(), &p, caps, false).0 {
             Prepared::Truncated { text, notice } => {
                 assert!(
                     text.lines().count() <= caps.max_lines,
@@ -753,7 +775,7 @@ mod tests {
             max_lines: 100,
             max_bytes: DEFAULT_MAX_BYTES,
         };
-        match classify(&std::env::temp_dir(), &p, caps).0 {
+        match classify(&std::env::temp_dir(), &p, caps, false).0 {
             Prepared::Truncated { text, notice } => {
                 assert!(
                     text.lines().count() <= 100,
@@ -778,7 +800,7 @@ mod tests {
             max_lines: DEFAULT_MAX_LINES,
             max_bytes: 64 * 1024,
         };
-        match classify(&std::env::temp_dir(), &p, caps).0 {
+        match classify(&std::env::temp_dir(), &p, caps, false).0 {
             Prepared::Truncated { text, notice } => {
                 assert!(
                     text.len() as u64 <= caps.max_bytes,
@@ -806,7 +828,7 @@ mod tests {
             max_lines: DEFAULT_MAX_LINES,
             max_bytes: cap,
         };
-        match classify(&std::env::temp_dir(), &p, caps).0 {
+        match classify(&std::env::temp_dir(), &p, caps, false).0 {
             Prepared::Truncated { text, .. } => {
                 assert!(
                     text.len() as u64 <= cap,
@@ -858,7 +880,7 @@ mod tests {
     fn classify_does_not_modify_the_file() {
         let p = tmp("ro.txt", b"unchanged\n");
         let before = fs::read(&p).unwrap();
-        let _ = classify(&std::env::temp_dir(), &p, Caps::default());
+        let _ = classify(&std::env::temp_dir(), &p, Caps::default(), false);
         assert_eq!(fs::read(&p).unwrap(), before); // AC-N1
         fs::remove_file(&p).ok();
     }
@@ -884,7 +906,7 @@ mod tests {
         let outside = tmp("elsewhere", b"linked content"); // lives in temp_dir, outside `root`
         let link = root.join("link.txt");
         symlink(&outside, &link).unwrap();
-        let (prepared, notice) = classify(&root, &link, Caps::default());
+        let (prepared, notice) = classify(&root, &link, Caps::default(), true);
         match prepared {
             Prepared::Full { text } => assert!(text.contains("linked content")),
             other => panic!("expected Full, got {other:?}"),
@@ -901,6 +923,33 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn blocks_an_out_of_root_symlink_by_default_with_a_self_explaining_placeholder() {
+        use std::os::unix::fs::symlink;
+        let root = unique_dir("root");
+        let outside = tmp("blocked", b"not shown");
+        let link = root.join("link.txt");
+        symlink(&outside, &link).unwrap();
+        // follow_external_symlinks=false (the default): no bytes, a placeholder that names the
+        // target and the opt-in — never the misleading "binary file" text.
+        let (prepared, notice) = classify(&root, &link, Caps::default(), false);
+        match prepared {
+            Prepared::Denied { placeholder } => {
+                let canonical = outside.canonicalize().unwrap();
+                assert!(
+                    placeholder.contains(&canonical.display().to_string())
+                        && placeholder.contains("follow_external_symlinks"),
+                    "placeholder names the target and the config opt-in: {placeholder}"
+                );
+            }
+            other => panic!("expected Denied, got {other:?}"),
+        }
+        assert_eq!(notice, None);
+        fs::remove_dir_all(&root).ok();
+        fs::remove_file(&outside).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn follows_a_symlink_that_stays_within_the_root() {
         use std::os::unix::fs::symlink;
         let root = unique_dir("root");
@@ -908,7 +957,8 @@ mod tests {
         fs::write(&real, "hello inside").unwrap();
         let link = root.join("link.txt");
         symlink(&real, &link).unwrap();
-        let (prepared, notice) = classify(&root, &link, Caps::default());
+        // No opt-in needed: an in-root symlink follows even with follow_external_symlinks=false.
+        let (prepared, notice) = classify(&root, &link, Caps::default(), false);
         match prepared {
             Prepared::Full { text } => assert!(text.contains("hello inside")),
             other => panic!("expected Full, got {other:?}"),
@@ -930,7 +980,10 @@ mod tests {
         let link = root.join("dirlink");
         symlink(&real_dir, &link).unwrap();
         // A directory is not readable content, symlinked or not (the tree browses it instead).
-        assert_eq!(classify(&root, &link, Caps::default()).0, Prepared::Binary);
+        assert_eq!(
+            classify(&root, &link, Caps::default(), true).0,
+            Prepared::Binary
+        );
         fs::remove_dir_all(&root).ok();
     }
 
@@ -947,7 +1000,7 @@ mod tests {
             .join("..")
             .join(outside.file_name().unwrap());
         assert_eq!(
-            classify(&root, &sneaky, Caps::default()),
+            classify(&root, &sneaky, Caps::default(), false),
             (Prepared::Binary, None),
             "AC-N5: no traversal above the root"
         );
@@ -961,7 +1014,10 @@ mod tests {
         // a directory is not a regular file
         let sub = root.join("subdir");
         fs::create_dir_all(&sub).unwrap();
-        assert_eq!(classify(&root, &sub, Caps::default()).0, Prepared::Binary);
+        assert_eq!(
+            classify(&root, &sub, Caps::default(), false).0,
+            Prepared::Binary
+        );
         fs::remove_dir_all(&root).ok();
     }
 

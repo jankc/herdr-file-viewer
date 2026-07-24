@@ -117,6 +117,12 @@ pub struct Config {
     pub open: Option<String>,
     pub reveal: Option<String>,
     pub hide_dotfiles: Option<bool>,
+    /// Whether the content pane may **follow a symlink whose target resolves outside the tree
+    /// root**. `None`/`false` (the default) keeps out-of-root reads blocked: such a symlink shows
+    /// an honest `[symlink → target: outside root, not shown]` placeholder instead of content.
+    /// `true` opts in to following it, always with a visible `symlink → target` notice. In-root
+    /// symlinks are followed either way.
+    pub follow_external_symlinks: Option<bool>,
     pub update_check: Option<bool>,
     /// Whether quitting with unexported session annotations confirms first. `None` falls back to
     /// `true`: annotations are session-only, so quitting destroys them, and the confirm is the only
@@ -266,6 +272,10 @@ pub struct EffectiveSettings {
     pub open: Option<Vec<String>>,
     pub reveal: Option<Vec<String>>,
     pub hide_dotfiles: bool,
+    /// The effective **follow-external-symlinks** switch: the config `follow_external_symlinks`
+    /// when present, else `false` — out-of-root symlink targets are not read unless the user
+    /// opts in. Config-or-default (no env var).
+    pub follow_external_symlinks: bool,
     pub update_check: bool,
     /// The effective **confirm-before-discarding-annotations** switch: the config
     /// `confirm_discard` when present, else `true`. Config-or-default (no env var).
@@ -340,6 +350,10 @@ pub fn resolve(config: &Config, get_env: impl Fn(&str) -> Option<String>) -> Eff
 
     let hide_dotfiles = config.hide_dotfiles.unwrap_or(false);
 
+    // Config > default; no env var. Defaults OFF: reading through a symlink to outside the tree
+    // root is an explicit opt-in, never a surprise (SECURITY.md).
+    let follow_external_symlinks = config.follow_external_symlinks.unwrap_or(false);
+
     // Config > default; no env var. Defaults ON: the confirm only fires when annotations are held,
     // so a session that never annotates never sees it, and the one that does has work to lose.
     let confirm_discard = config.confirm_discard.unwrap_or(true);
@@ -413,6 +427,7 @@ pub fn resolve(config: &Config, get_env: impl Fn(&str) -> Option<String>) -> Eff
         open,
         reveal,
         hide_dotfiles,
+        follow_external_symlinks,
         update_check,
         confirm_discard,
         scroll_lines,
@@ -856,6 +871,17 @@ mod tests {
         assert_eq!(effective.open, None);
         assert_eq!(effective.reveal, None);
         assert_eq!(effective.scroll_lines, 3);
+        assert!(
+            !effective.follow_external_symlinks,
+            "out-of-root symlink targets are blocked unless explicitly opted in"
+        );
+    }
+
+    #[test]
+    fn resolve_follow_external_symlinks_opt_in() {
+        let (config, _) = parse_config("follow_external_symlinks = true\n");
+        assert_eq!(config.follow_external_symlinks, Some(true));
+        assert!(resolve(&config, |_| None).follow_external_symlinks);
     }
 
     // --- resolve: AC-16 partial config -- unset fields fall to their own default ---

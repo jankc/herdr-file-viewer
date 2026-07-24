@@ -23,10 +23,10 @@ fn classify_and_ingest_one_megabyte_within_300ms() {
     fs::write(&path, &content).unwrap();
 
     let start = Instant::now();
-    let (prepared, _notice) = classify(dir.path(), &path, Caps::default());
+    let (prepared, _notice) = classify(dir.path(), &path, Caps::default(), false);
     let text = match &prepared {
         Prepared::Full { text } | Prepared::Truncated { text, .. } => text.clone(),
-        Prepared::Binary => String::new(),
+        Prepared::Binary | Prepared::Denied { .. } => String::new(),
     };
     let _ingested = to_text(&text);
     let elapsed = start.elapsed();

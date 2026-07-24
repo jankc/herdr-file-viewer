@@ -7,8 +7,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+- `follow_external_symlinks` config key (default `false`): opt in to reading a symlink whose target resolves outside the tree root; blocked links show a placeholder naming the target. → [configuration](docs/configuration.md)
+
 ### Changed
-- Symlinks are now followed: the content pane shows the target's content with a visible `symlink → target` notice (even when the target resolves outside the tree root), symlinked directories are browsable in the tree (with link-cycle protection), and symlinked files appear in the go-to-file finder. `..`-style path traversal above the root remains blocked. → [usage](docs/usage.md#symlinks)
+- Symlinks are now first-class: in-root symlinked files show their target's content with a visible `symlink → target` notice, symlinked directories are browsable in the tree (with link-cycle protection), and symlinked files appear in the go-to-file finder. `..`-style path traversal above the root remains blocked. → [usage](docs/usage.md#symlinks)
 
 ### Fixed
 - Selecting a symlink no longer shows the misleading `[binary file: preview not shown]` placeholder.

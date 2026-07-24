@@ -68,6 +68,10 @@ pub fn run(open_flag: Option<String>) -> io::Result<()> {
     // and byte-converted). `Copy`, so the factory closure below captures it by value.
     let caps = eff.preview_caps();
 
+    // Whether out-of-root symlink targets may be read (config `follow_external_symlinks`,
+    // default false). `Copy`, captured by value like `caps`.
+    let follow_external_symlinks = eff.follow_external_symlinks;
+
     // The root-bound providers are built by a factory so a later re-root rebuilds them against
     // the new root (ADR-0004). Non-capturing — it reads the passed `Resolved`, so re-root gets
     // the new root's git/renderer rather than closing over the launch root.
@@ -87,6 +91,7 @@ pub fn run(open_flag: Option<String>) -> io::Result<()> {
                 root: resolved.root.clone(),
                 renderers: factory_renderers.clone(),
                 caps,
+                follow_external_symlinks,
             });
             RootProviders { git, content }
         });
@@ -484,6 +489,9 @@ struct LiveContent {
     /// The size caps (line + byte) for classifying/previewing content, resolved from config
     /// (`preview_max_lines` / `preview_max_kib`) at startup. `Copy`.
     caps: Caps,
+    /// Whether an out-of-root symlink target may be read (config `follow_external_symlinks`,
+    /// default false — blocked with a self-explaining placeholder).
+    follow_external_symlinks: bool,
 }
 
 impl ContentProvider for LiveContent {
@@ -508,7 +516,7 @@ impl ContentProvider for LiveContent {
         let (prepared, link_notice) = if matches!(mode, ViewMode::Diff | ViewMode::FullDiff) {
             (Prepared::Binary, None)
         } else {
-            render::classify(&self.root, path, self.caps)
+            render::classify(&self.root, path, self.caps, self.follow_external_symlinks)
         };
         let name = path.file_name().and_then(OsStr::to_str);
         // Retain the raw source lines behind a source-mapped render: `SyntaxContent` displays one
@@ -1369,6 +1377,7 @@ mod tests {
                 timeout: Duration::from_secs(5),
             },
             caps: Caps::default(),
+            follow_external_symlinks: false,
         }
     }
 
@@ -1395,6 +1404,7 @@ mod tests {
                 max_lines: 50,
                 max_bytes: 1024 * 1024,
             },
+            follow_external_symlinks: false,
         };
         let out = content.render_at_width(
             &file,
@@ -1431,6 +1441,7 @@ mod tests {
                 timeout: Duration::from_secs(5),
             },
             caps: Caps::default(),
+            follow_external_symlinks: false,
         };
         let out = content.render_at_width(
             &link,
